@@ -1,0 +1,1636 @@
+' ============================================================================
+' COPY CURRENT TO PREVIOUS - Fixed version (ONLY affects Previous Data)
+' ============================================================================
+Sub CopyCurrentToPrevious()
+    ' This copies Current Data to Previous Data EXACTLY as shown
+    
+    Dim wsCurrent As Worksheet
+    Dim wsPrevious As Worksheet
+    Dim lastRow As Long
+    
+    Set wsCurrent = ThisWorkbook.Sheets("Current Data")
+    Set wsPrevious = ThisWorkbook.Sheets("Previous Data")
+    
+    Application.ScreenUpdating = False
+    
+    ' Clear ONLY Previous Data sheet
+    wsPrevious.Cells.Clear
+    
+    ' Find how many rows of data in Current Data
+    lastRow = wsCurrent.Cells(wsCurrent.Rows.count, "A").End(xlUp).Row
+    
+    If lastRow >= 3 Then ' Has header and at least some data
+        ' Copy TITLE (row 1)
+        wsCurrent.Rows(1).Copy wsPrevious.Rows(1)
+        
+        ' Copy HEADERS (row 2) - ALL 5 COLUMNS
+        wsCurrent.Range("A2:E2").Copy wsPrevious.Range("A2:E2")
+        
+        ' Copy ALL DATA (rows 3 to lastRow) - ALL 5 COLUMNS
+        wsCurrent.Range("A3:E" & lastRow).Copy wsPrevious.Range("A3:E" & lastRow)
+        
+        ' Copy formatting from Current Data
+        With wsPrevious
+            ' Copy title formatting
+            .Rows(1).Font.Bold = True
+            .Rows(1).Font.Size = 14
+            .Rows(1).HorizontalAlignment = xlCenter
+            
+            ' Copy header formatting
+            With .Range("A2:E2")
+                .Font.Bold = True
+                .Interior.Color = RGB(217, 217, 217)
+                .HorizontalAlignment = xlCenter
+            End With
+            
+            ' Format Total KC column (B)
+            If lastRow >= 3 Then
+                .Range("B3:B" & lastRow).NumberFormat = "#,##0"
+                .Range("B3:B" & lastRow).HorizontalAlignment = xlRight
+            End If
+            
+            ' Format Players column (C)
+            If lastRow >= 3 Then
+                .Range("C3:C" & lastRow).HorizontalAlignment = xlCenter
+            End If
+            
+            ' Format Timestamp column (D)
+            If lastRow >= 3 Then
+                .Range("D3:D" & lastRow).NumberFormat = "mm/dd hh:mm"
+                .Range("D3:D" & lastRow).HorizontalAlignment = xlCenter
+            End If
+            
+            ' Add borders
+            With .Range("A1:E" & lastRow)
+                .Borders.LineStyle = xlContinuous
+                .Borders.Weight = xlThin
+            End With
+            
+            ' Auto-fit columns
+            .Columns("A:E").AutoFit
+            
+            ' Add filter
+            .Range("A2:E" & lastRow).AutoFilter
+            
+            ' Add timestamp in column G
+            .Range("G1").Value = "Last Updated: " & Format(Now, "yyyy-mm-dd hh:mm:ss")
+        End With
+        
+        MsgBox "Current data saved to Previous Data sheet", vbInformation
+    Else
+        MsgBox "No data in Current Data to save", vbExclamation
+    End If
+    
+    Application.ScreenUpdating = True
+End Sub
+
+' ============================================================================
+' FORMAT PREVIOUS DATA SHEET
+' ============================================================================
+Sub FormatPreviousDataSheet(wsPrevious As Worksheet, lastRow As Long)
+    ' Format the Previous Data sheet independently
+    
+    With wsPrevious
+        ' Format headers
+        If .Range("A2").Value <> "" Then
+            With .Range("A2:E2")
+                .Font.Bold = True
+                .Interior.Color = RGB(217, 217, 217)
+                .HorizontalAlignment = xlCenter
+            End With
+            
+            ' Format data
+            With .Range("B3:B" & lastRow) ' Total KC column
+                .HorizontalAlignment = xlRight
+                .NumberFormat = "#,##0"
+            End With
+            
+            With .Range("C3:C" & lastRow) ' Players column
+                .HorizontalAlignment = xlCenter
+                .NumberFormat = "0"
+            End With
+            
+            With .Range("D3:D" & lastRow) ' Timestamp column
+                .NumberFormat = "mm/dd hh:mm"
+                .HorizontalAlignment = xlCenter
+            End With
+            
+            With .Range("E3:E" & lastRow) ' Filename column
+                .HorizontalAlignment = xlLeft
+            End With
+            
+            ' Add borders
+            With .Range("A1").CurrentRegion
+                .Borders.LineStyle = xlContinuous
+                .Borders.Weight = xlThin
+            End With
+            
+            ' Auto-fit columns
+            .Columns.AutoFit
+            
+            ' Auto-filter
+            .Range("A2:E" & lastRow).AutoFilter
+        End If
+    End With
+End Sub
+
+' ============================================================================
+' IMPORT BOSS TOTALS - Sums KC for each boss
+' ============================================================================
+Sub ImportBossTotals()
+    On Error GoTo ErrorHandler
+    
+    Application.ScreenUpdating = False
+    
+    Dim wsCurrent As Worksheet
+    Dim folderPath As String, fileName As String, filePath As String
+    Dim bossName As String
+    Dim totalKC As Double
+    Dim rowNum As Long
+    Dim fileCount As Long
+    
+    ' Set reference to Current Data sheet
+    Set wsCurrent = ThisWorkbook.Worksheets("Current Data")
+    
+    ' Prepare the sheet
+    With wsCurrent
+        .Cells.Clear
+        .Range("A1").Value = "BOSS KC TOTALS"
+        .Range("A2").Value = "Boss Name"
+        .Range("B2").Value = "Total KC"
+        .Range("C2").Value = "Players"
+        .Range("D2").Value = "Last Updated"
+        .Range("E2").Value = "Filename"
+    End With
+    
+    ' Your specific path
+    folderPath = "C:\Users\nikki\AppData\Local\Temp\RuneScapeData\"
+    
+    ' Get first CSV file
+    fileName = Dir(folderPath & "*.csv")
+    rowNum = 3 ' Start at row 3 for data
+    fileCount = 0
+    
+    ' Process each CSV file
+    Do While fileName <> ""
+        fileCount = fileCount + 1
+        
+        ' Extract boss name from filename
+        bossName = Replace(fileName, ".csv", "")
+        bossName = Replace(bossName, "_", " ")
+        
+        ' Get boss name from first line of CSV (more accurate)
+        bossName = GetBossNameFromCSV(folderPath & fileName, bossName)
+        
+        ' Calculate total KC for this boss
+        totalKC = GetTotalKCFromCSV(folderPath & fileName)
+        
+        ' Write to sheet
+        wsCurrent.Cells(rowNum, 1).Value = bossName
+        wsCurrent.Cells(rowNum, 2).Value = totalKC
+        wsCurrent.Cells(rowNum, 3).Value = GetPlayerCount(folderPath & fileName)
+        wsCurrent.Cells(rowNum, 4).Value = Now
+        wsCurrent.Cells(rowNum, 5).Value = fileName
+        
+        rowNum = rowNum + 1
+        fileName = Dir()
+    Loop
+    
+    ' Sort by total KC (highest first)
+    If rowNum > 3 Then
+        wsCurrent.Sort.SortFields.Clear
+        wsCurrent.Sort.SortFields.Add2 Key:=wsCurrent.Range("B3:B" & rowNum - 1), _
+            SortOn:=xlSortOnValues, Order:=xlDescending
+        With wsCurrent.Sort
+            .SetRange wsCurrent.Range("A2:E" & rowNum - 1)
+            .Header = xlYes
+            .Apply
+        End With
+    End If
+    
+    ' Format the sheet
+    Call FormatBossTotalsSheet(wsCurrent, rowNum - 1)
+    
+    ' Update Dashboard
+    With ThisWorkbook.Sheets("Dashboard")
+        .Range("B3").Value = "Last: " & Format(Now, "mm/dd hh:mm")
+        .Range("B4").Value = "Bosses: " & fileCount & " files"
+    End With
+    
+    ' Show summary
+    MsgBox "Imported " & fileCount & " boss files" & vbCrLf & _
+           "Total bosses tracked: " & (rowNum - 3), vbInformation
+    
+Cleanup:
+    Application.ScreenUpdating = True
+    Exit Sub
+    
+ErrorHandler:
+    MsgBox "Error on file: " & fileName & vbCrLf & _
+           "Error: " & Err.Description, vbExclamation
+    Resume Cleanup
+End Sub
+
+Function GetBossNameFromCSV(filePath As String, defaultName As String) As String
+    Dim fso As Object, ts As Object
+    
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    
+    If fso.FileExists(filePath) Then
+        Set ts = fso.OpenTextFile(filePath, 1)
+        
+        ' Skip header line
+        If Not ts.AtEndOfStream Then ts.ReadLine
+        
+        ' Read first data line
+        If Not ts.AtEndOfStream Then
+            Dim firstDataLine As String, parts() As String
+            firstDataLine = ts.ReadLine
+            
+            ' Split by comma and get boss name (first column)
+            parts = Split(firstDataLine, ",")
+            If UBound(parts) >= 0 Then
+                GetBossNameFromCSV = Trim(parts(0))
+            Else
+                GetBossNameFromCSV = defaultName
+            End If
+        Else
+            GetBossNameFromCSV = defaultName
+        End If
+        
+        ts.Close
+    Else
+        GetBossNameFromCSV = defaultName
+    End If
+    
+    Set fso = Nothing
+End Function
+
+' Sum all KC values from a CSV file
+Function GetTotalKCFromCSV(filePath As String) As Double
+    Dim fso As Object, ts As Object
+    Dim totalKC As Double
+    Dim line As String, parts() As String
+    Dim kcValue As String
+    
+    totalKC = 0
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    
+    If fso.FileExists(filePath) Then
+        Set ts = fso.OpenTextFile(filePath, 1)
+        
+        ' Skip header line
+        If Not ts.AtEndOfStream Then ts.ReadLine
+        
+        ' Read all data lines
+         Do While Not ts.AtEndOfStream
+            line = ts.ReadLine
+            parts = SplitQuotedCSV(line) ' Use custom function instead
+            
+            If UBound(parts) >= 1 Then ' At least 5 columns
+                ' KC is in column 5 (index 4)
+                kcValue = Trim(parts(1))
+                
+                ' Remove quotes if present
+                kcValue = Replace(kcValue, """", "")
+                
+                ' Remove commas from numbers like "1,121"
+                kcValue = Replace(kcValue, ",", "")
+                
+                ' Convert to number
+                If IsNumeric(kcValue) Then
+                    totalKC = totalKC + Val(kcValue)
+                End If
+            End If
+        Loop
+        
+        ts.Close
+    End If
+    
+    GetTotalKCFromCSV = totalKC
+    Set fso = Nothing
+End Function
+
+' Count number of players in CSV
+Function GetPlayerCount(filePath As String) As Long
+    Dim fso As Object, ts As Object
+    Dim playerCount As Long
+    Dim line As String, parts() As String
+    
+    playerCount = 0
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    
+    If fso.FileExists(filePath) Then
+        Set ts = fso.OpenTextFile(filePath, 1)
+        
+        ' Skip header line
+        If Not ts.AtEndOfStream Then ts.ReadLine
+        
+        ' Read data line (only 1 line in new format)
+        If Not ts.AtEndOfStream Then
+            line = ts.ReadLine
+            parts = Split(line, ",")
+            
+            ' NEW FORMAT: Players is in column 3 (index 2)
+            If UBound(parts) >= 2 Then
+                If IsNumeric(Trim(parts(2))) Then
+                    playerCount = Val(Trim(parts(2)))
+                End If
+            End If
+        End If
+        
+        ts.Close
+    End If
+    
+    GetPlayerCount = playerCount
+    Set fso = Nothing
+End Function
+
+' Format the sheet
+Sub FormatBossTotalsSheet(ws As Worksheet, lastRow As Long)
+    If lastRow >= 3 Then
+        ' Format headers
+        With ws.Range("A2:E2")
+            .Font.Bold = True
+            .Interior.Color = RGB(217, 217, 217)
+            .HorizontalAlignment = xlCenter
+        End With
+        
+        ' Format data
+        With ws.Range("B3:B" & lastRow) ' Total KC column
+            .HorizontalAlignment = xlRight
+            .NumberFormat = "#,##0"
+        End With
+        
+        With ws.Range("C3:C" & lastRow) ' Players column
+            .HorizontalAlignment = xlCenter
+            .NumberFormat = "0"
+        End With
+        
+        With ws.Range("D3:D" & lastRow) ' Timestamp column
+            .NumberFormat = "mm/dd hh:mm"
+            .HorizontalAlignment = xlCenter
+        End With
+        
+        With ws.Range("E3:E" & lastRow) ' Filename column
+            .HorizontalAlignment = xlLeft
+        End With
+        
+        ' Add borders
+        With ws.Range("A1").CurrentRegion
+            .Borders.LineStyle = xlContinuous
+            .Borders.Weight = xlThin
+        End With
+        
+        ' Auto-fit columns
+        ws.Columns.AutoFit
+        
+        ' Auto-filter
+        ws.Range("A2:E" & lastRow).AutoFilter
+    End If
+End Sub
+
+' Helper function to properly split CSV lines with quoted values
+Function SplitQuotedCSV(ByVal line As String) As String()
+    Dim result() As String
+    Dim temp() As String
+    Dim i As Long, j As Long, count As Long
+    Dim inQuotes As Boolean
+    Dim currentField As String
+    
+    ' Simple approach: Handle the quotes issue
+    ' Replace comma inside quotes with a placeholder first
+    inQuotes = False
+    For i = 1 To Len(line)
+        If Mid(line, i, 1) = """" Then
+            inQuotes = Not inQuotes
+        ElseIf Mid(line, i, 1) = "," And inQuotes Then
+            ' Replace comma inside quotes with a special character
+            line = Left(line, i - 1) & "|" & Mid(line, i + 1)
+        End If
+    Next i
+    
+    ' Now split by comma
+    temp = Split(line, ",")
+    
+    ' Restore the commas inside quotes
+    For i = LBound(temp) To UBound(temp)
+        temp(i) = Replace(temp(i), "|", ",")
+        ' Remove surrounding quotes
+        If Left(temp(i), 1) = """" And Right(temp(i), 1) = """" Then
+            temp(i) = Mid(temp(i), 2, Len(temp(i)) - 2)
+        End If
+    Next i
+    
+    SplitQuotedCSV = temp
+End Function
+
+' ============================================================================
+' ARCHIVE CHANGES - Main button function
+' ============================================================================
+Sub ArchiveChanges()
+    On Error GoTo ErrorHandler
+    
+    Application.ScreenUpdating = False
+    
+    Dim wsCurrent As Worksheet
+    Dim wsPrevious As Worksheet
+    Dim wsChanges As Worksheet
+    Dim wsArchive As Worksheet
+    
+    ' Set sheet references
+    Set wsCurrent = ThisWorkbook.Sheets("Current Data")
+    Set wsPrevious = ThisWorkbook.Sheets("Previous Data")
+    Set wsChanges = ThisWorkbook.Sheets("Changes")
+    Set wsArchive = ThisWorkbook.Sheets("Archived Changes")
+    
+    ' 1. First, save Current Data to Previous Data
+    Call CopyCurrentToPrevious
+    
+    ' 2. Generate the changes (if not already done)
+    If wsChanges.Range("A3").Value = "" Then
+        Call CompareBossChanges
+    End If
+    
+    ' 3. Archive the current changes
+    Call ArchiveTheChanges
+    
+    ' 4. Optional: Re-generate fresh comparison for next time
+    ' Call CompareBossChanges ' Uncomment if you want fresh comparison
+    
+    Application.ScreenUpdating = True
+    
+    MsgBox "Archive Complete!" & vbCrLf & _
+           "? Current data saved to Previous Data" & vbCrLf & _
+           "? Changes archived to 'Archived Changes' sheet" & vbCrLf & _
+           "Archive now shows last 10 differentials", _
+           vbInformation, "Success"
+    
+    ' Go to archive sheet
+    wsArchive.Activate
+    wsArchive.Range("A2").Select
+    
+    Exit Sub
+
+ErrorHandler:
+    Application.ScreenUpdating = True
+    
+    Select Case Err.Number
+        Case 9 ' Subscript out of range (sheet doesn't exist)
+            If MsgBox("Some sheets are missing. Create them?", vbYesNo + vbQuestion) = vbYes Then
+                Call CreateMissingSheets
+                Resume
+            End If
+        Case Else
+            MsgBox "Error " & Err.Number & ": " & Err.Description & vbCrLf & _
+                   "Please make sure:" & vbCrLf & _
+                   "1. All sheets exist" & vbCrLf & _
+                   "2. Current Data has data", _
+                   vbCritical, "Archive Error"
+    End Select
+End Sub
+
+' ===== AUTOMATIC FUNCTION FINDER VERSION =====
+' Use this version if you don't know your function names
+
+Sub ArchiveChangesAutoFind()
+    On Error GoTo ErrorHandler
+    
+    Dim wsArchive As Worksheet
+    Dim wsDiff As Worksheet
+    Dim success As Boolean
+    
+    ' Get sheet references
+    Set wsArchive = ThisWorkbook.Sheets("Archived Changes")
+    Set wsDiff = ThisWorkbook.Sheets("Changes")
+    
+    ' Try to find and run save function
+    success = RunFunctionByName("save")
+    If Not success Then
+        MsgBox "Could not find/run save function. Trying to continue...", vbExclamation
+    End If
+    
+    ' Wait a moment
+    Application.Wait Now + TimeValue("00:00:01")
+    
+    ' Try to find and run generate function
+    success = RunFunctionByName("diff|change|generate|compare")
+    If Not success Then
+        MsgBox "Could not find/run generate function. Trying to continue...", vbExclamation
+    End If
+    
+    ' Wait for changes to generate
+    Application.Wait Now + TimeValue("00:00:02")
+    
+    ' Now archive
+    ArchiveTheData wsDiff, wsArchive
+    
+    MsgBox "Archive complete! Check 'Archived Changes' sheet.", vbInformation
+    
+    Exit Sub
+    
+ErrorHandler:
+    MsgBox "Error in ArchiveChangesAutoFind: " & Err.Description, vbCritical
+End Sub
+
+Function RunFunctionByName(keywords As String) As Boolean
+    ' Try to find and run a function containing keywords
+    Dim comp As VBComponent
+    Dim line As String
+    Dim i As Long
+    Dim funcName As String
+    Dim keywordArray As Variant
+    Dim keyword As Variant
+    
+    keywordArray = Split(keywords, "|")
+    
+    For Each comp In ThisWorkbook.VBProject.VBComponents
+        If comp.CodeModule.CountOfLines > 0 Then
+            For i = 1 To comp.CodeModule.CountOfDeclarations
+                line = comp.CodeModule.lines(i, 1)
+                If InStr(1, line, "Sub ", vbTextCompare) > 0 Then
+                    ' Extract function name
+                    funcName = Trim(Mid(line, InStr(line, "Sub ") + 4))
+                    funcName = Left(funcName, InStr(funcName & "(", "(") - 1)
+                    
+                    ' Check if function name contains any keywords
+                    For Each keyword In keywordArray
+                        If InStr(1, funcName, keyword, vbTextCompare) > 0 Then
+                            On Error Resume Next
+                            Application.Run funcName
+                            If Err.Number = 0 Then
+                                RunFunctionByName = True
+                                Exit Function
+                            End If
+                            On Error GoTo 0
+                        End If
+                    Next keyword
+                End If
+            Next i
+        End If
+    Next comp
+    
+    RunFunctionByName = False
+End Function
+
+Sub ArchiveTheData(wsDiff As Worksheet, wsArchive As Worksheet)
+    ' Archive the data from Changes to Archived Changes
+    Dim lastRow As Long
+    Dim i As Long
+    
+    With wsArchive
+        ' Shift existing entries
+        For i = 10 To 2 Step -1
+            .Rows(i + 1).Value = .Rows(i).Value
+        Next i
+        
+        ' Clear row 2
+        .Rows(2).ClearContents
+        
+        ' Add timestamp
+        .Range("A2").Value = Now
+        .Range("B2").Value = "Archived " & Format(Now, "mmm d, yyyy")
+        
+        ' Copy data
+        wsDiff.UsedRange.Copy
+        .Range("C2").PasteSpecial xlPasteValues
+        Application.CutCopyMode = False
+        
+        ' Format
+        .Range("A2").NumberFormat = "yyyy-mm-dd hh:mm:ss"
+        .Columns.AutoFit
+    End With
+End Sub
+
+' ===== ULTRA-SIMPLE VERSION =====
+' Use this if you just want to archive what's currently in the Changes sheet
+
+Sub QuickArchive()
+    ' Just archive whatever is currently in the Changes sheet
+    Dim wsArchive As Worksheet
+    Dim wsDiff As Worksheet
+    
+    On Error Resume Next
+    Set wsArchive = ThisWorkbook.Sheets("Archived Changes")
+    Set wsDiff = ThisWorkbook.Sheets("Changes")
+    On Error GoTo 0
+    
+    If wsArchive Is Nothing Or wsDiff Is Nothing Then
+        MsgBox "Please make sure both 'Changes' and 'Archived Changes' sheets exist.", vbExclamation
+        Exit Sub
+    End If
+    
+    ' Call the archiving function
+    ArchiveTheData wsDiff, wsArchive
+    
+    MsgBox "Current changes have been archived!", vbInformation
+End Sub
+
+' ===== BUTTON-CLICKING VERSION =====
+' Use this if you have buttons with specific names
+
+Sub ArchiveUsingButtons()
+    ' Replace these button names with your actual button names
+    Dim saveButtonName As String
+    Dim diffButtonName As String
+    
+    ' CHANGE THESE TO YOUR ACTUAL BUTTON NAMES:
+    saveButtonName = "Save to Previous"  ' <-- Change this
+    diffButtonName = "Generate Changes"  ' <-- Change this
+    
+    On Error Resume Next
+    
+    ' Click the save button
+    ActiveSheet.Shapes(saveButtonName).OnAction
+    If Err.Number <> 0 Then
+        MsgBox "Could not find save button: " & saveButtonName, vbExclamation
+        Exit Sub
+    End If
+    
+    ' Wait
+    Application.Wait Now + TimeValue("00:00:02")
+    
+    ' Click the diff button
+    Err.Clear
+    ActiveSheet.Shapes(diffButtonName).OnAction
+    If Err.Number <> 0 Then
+        MsgBox "Could not find diff button: " & diffButtonName, vbExclamation
+    End If
+    
+    ' Wait
+    Application.Wait Now + TimeValue("00:00:02")
+    
+    ' Now archive
+    QuickArchive
+    
+    On Error GoTo 0
+End Sub
+
+' ============================================================================
+' CREATE MISSING SHEETS - Helper function
+' ============================================================================
+Sub CreateMissingSheets()
+    Dim ws As Worksheet
+    
+    On Error Resume Next
+    
+    ' Check and create Archived Changes if missing
+    Set ws = ThisWorkbook.Sheets("Archived Changes")
+    If ws Is Nothing Then
+        Set ws = ThisWorkbook.Sheets.Add(After:=ThisWorkbook.Sheets(ThisWorkbook.Sheets.count))
+        ws.Name = "Archived Changes"
+        
+        ' Set up basic structure
+        ws.Range("A1").Value = "ARCHIVE OF CHANGES (Last 10)"
+        ws.Range("A2").Value = "Archive Date/Time"
+        ws.Range("B2").Value = "Description"
+        ws.Range("C2").Value = "Changes Summary"
+        
+        ' Format
+        With ws.Range("A1:C1")
+            .Font.Bold = True
+            .Font.Size = 14
+            .Merge
+            .HorizontalAlignment = xlCenter
+        End With
+        
+        With ws.Range("A2:C2")
+            .Font.Bold = True
+            .Interior.Color = RGB(217, 217, 217)
+            .HorizontalAlignment = xlCenter
+        End With
+        
+        ws.Columns("A").NumberFormat = "yyyy-mm-dd hh:mm:ss"
+        ws.Columns("A:C").ColumnWidth = 20
+    End If
+    
+    ' Check and create Changes if missing
+    Set ws = ThisWorkbook.Sheets("Changes")
+    If ws Is Nothing Then
+        Set ws = ThisWorkbook.Sheets.Add(After:=ThisWorkbook.Sheets(ThisWorkbook.Sheets.count))
+        ws.Name = "Changes"
+    End If
+    
+    On Error GoTo 0
+    
+    MsgBox "Missing sheets have been created.", vbInformation
+End Sub
+
+' FIND YOUR EXISTING FUNCTION NAMES:
+' Replace these function calls with your actual function names
+' Run the FindFunctionNames macro below to discover them
+
+Sub SaveCurrentToPrevious()
+    ' This is a placeholder - REPLACE WITH YOUR ACTUAL FUNCTION
+    MsgBox "Please replace 'SaveCurrentToPrevious' with your actual save function name", vbExclamation
+    ' Your actual save code should be here
+End Sub
+
+Sub GenerateChanges()
+    ' This is a placeholder - REPLACE WITH YOUR ACTUAL FUNCTION
+    MsgBox "Please replace 'GenerateChanges' with your actual changes function name", vbExclamation
+    ' Your actual generate changes code should be here
+End Sub
+
+' ===== TOOL: FIND YOUR ACTUAL FUNCTION NAMES =====
+Sub FindFunctionNames()
+    ' Run this to discover what your existing functions are called
+    Dim comp As VBComponent
+    Dim line As String
+    Dim i As Long
+    Dim funcList As String
+    
+    For Each comp In ThisWorkbook.VBProject.VBComponents
+        If comp.CodeModule.CountOfLines > 0 Then
+            For i = 1 To comp.CodeModule.CountOfDeclarations
+                line = comp.CodeModule.lines(i, 1)
+                If InStr(1, line, "Sub ", vbTextCompare) > 0 Then
+                    funcList = funcList & comp.Name & ": " & Mid(line, InStr(line, "Sub ") + 4) & vbCrLf
+                End If
+            Next i
+        End If
+    Next comp
+    
+    If funcList = "" Then
+        funcList = "No functions found. Check if macros are enabled."
+    End If
+    
+    ' Show in message box and immediate window
+    MsgBox "Found these functions:" & vbCrLf & vbCrLf & funcList, vbInformation, "Function List"
+    Debug.Print "=== FUNCTIONS FOUND ==="
+    Debug.Print funcList
+End Sub
+
+' ===== SIMPLER VERSION IF YOU HAVE BUTTONS =====
+Sub ArchiveChangesSimple()
+    ' Use this version if you have buttons that already work
+    
+    ' 1. Simulate clicking your "Save to Previous Data" button
+    ' Replace "Button 1" with your actual button name
+    On Error Resume Next
+    ActiveSheet.Shapes("Save Button").OnAction  ' Change to your button name
+    If Err.Number <> 0 Then
+        ' Try common button names
+        ActiveSheet.Shapes("Button 1").OnAction
+        ActiveSheet.Shapes("CommandButton1").OnAction
+    End If
+    On Error GoTo 0
+    
+    ' Wait a moment for the save to complete
+    Application.Wait Now + TimeValue("00:00:01")
+    
+    ' 2. Simulate clicking your "Generate Changes" button
+    On Error Resume Next
+    ActiveSheet.Shapes("Changes Button").OnAction  ' Change to your button name
+    If Err.Number <> 0 Then
+        ' Try common button names
+        ActiveSheet.Shapes("Button 2").OnAction
+        ActiveSheet.Shapes("CommandButton2").OnAction
+    End If
+    On Error GoTo 0
+    
+    ' Wait for changes to generate
+    Application.Wait Now + TimeValue("00:00:01")
+    
+    ' 3. Now archive the results
+    ArchiveTheChanges
+End Sub
+
+' ============================================================================
+' ARCHIVE THE CHANGES - Clean version
+' ============================================================================
+Sub ArchiveTheChanges()
+    ' Archive the current Changes sheet data to Archived Changes sheet
+    ' Creates a clean, organized archive
+    
+    Dim wsChanges As Worksheet
+    Dim wsArchive As Worksheet
+    Dim lastRow As Long, lastCol As Long
+    Dim i As Long, j As Long
+    Dim archiveRow As Long
+    Dim increases As Long, decreases As Long
+    Dim topIncreases As String, topDecreases As String
+    Dim count As Long
+    
+    Set wsChanges = ThisWorkbook.Sheets("Changes")
+    Set wsArchive = ThisWorkbook.Sheets("Archived Changes")
+    
+    ' Check if we have changes to archive
+    If wsChanges.Range("A3").Value = "" Then
+        MsgBox "No changes to archive. Run 'Compare Boss Changes' first.", vbExclamation
+        Exit Sub
+    End If
+    
+    Application.ScreenUpdating = False
+    
+    ' Clear and set up archive sheet with proper structure
+    SetupArchiveSheet wsArchive
+    
+    ' Find data in Changes sheet
+    lastRow = wsChanges.Cells(wsChanges.Rows.count, "A").End(xlUp).Row
+    lastCol = wsChanges.Cells(1, wsChanges.Columns.count).End(xlToLeft).Column
+    
+    ' Count increases and decreases
+    increases = 0
+    decreases = 0
+    For i = 3 To lastRow
+        If wsChanges.Cells(i, 4).Value > 0 Then
+            increases = increases + 1
+        ElseIf wsChanges.Cells(i, 4).Value < 0 Then
+            decreases = decreases + 1
+        End If
+    Next i
+    
+    ' Get top 3 increases
+    topIncreases = ""
+    count = 0
+    For i = 3 To lastRow
+        If wsChanges.Cells(i, 4).Value > 0 Then
+            topIncreases = topIncreases & "• " & wsChanges.Cells(i, 1).Value & _
+                          ": +" & Format(wsChanges.Cells(i, 4).Value, "#,##0") & " KC" & vbLf
+            count = count + 1
+            If count >= 3 Then Exit For
+        End If
+    Next i
+    If topIncreases = "" Then topIncreases = "None"
+    
+    ' Get top 3 decreases
+    topDecreases = ""
+    count = 0
+    For i = 3 To lastRow
+        If wsChanges.Cells(i, 4).Value < 0 Then
+            topDecreases = topDecreases & "• " & wsChanges.Cells(i, 1).Value & _
+                          ": " & Format(wsChanges.Cells(i, 4).Value, "#,##0") & " KC" & vbLf
+            count = count + 1
+            If count >= 3 Then Exit For
+        End If
+    Next i
+    If topDecreases = "" Then topDecreases = "None"
+    
+    ' SHIFT EXISTING ENTRIES DOWN (keep only last 10)
+    ' Start from bottom and work up
+    For i = 15 To 3 Step -1 ' Give enough room
+        If wsArchive.Cells(i, 1).Value <> "" Then
+            ' Shift entire block down
+            wsArchive.Rows(i + 12).Value = wsArchive.Rows(i).Value
+        End If
+    Next i
+    
+    ' Clear rows for new entry
+    For i = 3 To 14
+        wsArchive.Rows(i).Clear
+    Next i
+    
+    ' ===== CREATE NEW ARCHIVE ENTRY =====
+    archiveRow = 3
+    
+    ' Row 1: Timestamp and summary
+    wsArchive.Cells(archiveRow, 1).Value = Now
+    wsArchive.Cells(archiveRow, 1).NumberFormat = "yyyy-mm-dd hh:mm:ss"
+    wsArchive.Cells(archiveRow, 2).Value = "Changes: " & increases & "? " & decreases & "?"
+    wsArchive.Cells(archiveRow, 3).Value = "Total: " & (increases + decreases) & " bosses changed"
+    
+    ' Format summary row
+    With wsArchive.Rows(archiveRow)
+        .Font.Bold = True
+        .Interior.Color = RGB(240, 240, 240)
+        .RowHeight = 25
+    End With
+    
+    archiveRow = archiveRow + 1
+    
+    ' Row 2: Top increases header
+    wsArchive.Cells(archiveRow, 1).Value = "TOP INCREASES:"
+    wsArchive.Cells(archiveRow, 1).Font.Bold = True
+    wsArchive.Cells(archiveRow, 1).Interior.Color = RGB(198, 239, 206) ' Light green
+    
+    ' Row 3-5: Top increases
+    Dim lines() As String
+    lines = Split(topIncreases, vbLf)
+    For i = 0 To UBound(lines)
+        If lines(i) <> "" Then
+            wsArchive.Cells(archiveRow + 1 + i, 1).Value = lines(i)
+        End If
+    Next i
+    
+    archiveRow = archiveRow + 4
+    
+    ' Row 6: Top decreases header
+    wsArchive.Cells(archiveRow, 1).Value = "TOP DECREASES:"
+    wsArchive.Cells(archiveRow, 1).Font.Bold = True
+    wsArchive.Cells(archiveRow, 1).Interior.Color = RGB(255, 199, 206) ' Light red
+    
+    ' Row 7-9: Top decreases
+    lines = Split(topDecreases, vbLf)
+    For i = 0 To UBound(lines)
+        If lines(i) <> "" Then
+            wsArchive.Cells(archiveRow + 1 + i, 1).Value = lines(i)
+        End If
+    Next i
+    
+    archiveRow = archiveRow + 4
+    
+    ' Row 10: Header for detailed changes
+    wsArchive.Cells(archiveRow, 1).Value = "FULL CHANGES LIST:"
+    wsArchive.Cells(archiveRow, 1).Font.Bold = True
+    wsArchive.Cells(archiveRow, 1).Interior.Color = RGB(217, 217, 217) ' Gray
+    
+    archiveRow = archiveRow + 1
+    
+    ' Row 11: Copy Changes sheet headers
+    For j = 1 To lastCol
+        wsArchive.Cells(archiveRow, j).Value = wsChanges.Cells(2, j).Value
+    Next j
+    
+    ' Format headers
+    With wsArchive.Rows(archiveRow)
+        .Font.Bold = True
+        .Interior.Color = RGB(217, 217, 217)
+        .HorizontalAlignment = xlCenter
+    End With
+    
+    archiveRow = archiveRow + 1
+    
+    ' Rows 12+: Copy changes data
+    For i = 3 To lastRow
+        For j = 1 To lastCol
+            wsArchive.Cells(archiveRow, j).Value = wsChanges.Cells(i, j).Value
+        Next j
+        
+        ' Copy formatting for change column (column 4)
+        If wsChanges.Cells(i, 4).Value > 0 Then
+            wsArchive.Cells(archiveRow, 4).Interior.Color = RGB(198, 239, 206) ' Green
+        ElseIf wsChanges.Cells(i, 4).Value < 0 Then
+            wsArchive.Cells(archiveRow, 4).Interior.Color = RGB(255, 199, 206) ' Red
+        End If
+        
+        ' Format percentage column
+        If IsNumeric(wsChanges.Cells(i, 5).Value) Then
+            wsArchive.Cells(archiveRow, 5).NumberFormat = "0.0%"
+        End If
+        
+        archiveRow = archiveRow + 1
+    Next i
+    
+    ' Add separator line
+    wsArchive.Cells(archiveRow, 1).Value = String(100, "-")
+    wsArchive.Cells(archiveRow, 1).Font.Color = RGB(150, 150, 150)
+    
+    ' Auto-fit columns
+    wsArchive.Columns.AutoFit
+    
+    ' Set specific widths for readability
+    wsArchive.Columns("A").ColumnWidth = 20
+    wsArchive.Columns("B").ColumnWidth = 15
+    wsArchive.Columns("C").ColumnWidth = 20
+    wsArchive.Columns("D").ColumnWidth = 12
+    wsArchive.Columns("E").ColumnWidth = 10
+    wsArchive.Columns("F").ColumnWidth = 15
+    
+    ' Add borders to data area
+    If archiveRow > 12 Then
+        With wsArchive.Range("A11:F" & archiveRow - 2)
+            .Borders.LineStyle = xlContinuous
+            .Borders.Weight = xlThin
+        End With
+    End If
+    
+    Application.ScreenUpdating = True
+    
+    ' Count how many archives we have
+    Dim archiveCount As Long
+    archiveCount = 0
+    For i = 3 To 100
+        If wsArchive.Cells(i, 1).Value <> "" And _
+           Not IsDate(wsArchive.Cells(i, 1).Value) Then
+            ' Skip non-date rows
+        ElseIf wsArchive.Cells(i, 1).Value <> "" Then
+            archiveCount = archiveCount + 1
+        End If
+    Next i
+    
+    MsgBox "Changes archived successfully!" & vbCrLf & _
+           "Archive now contains " & archiveCount & " entries", _
+           vbInformation
+End Sub
+
+' ============================================================================
+' SETUP ARCHIVE SHEET - Initial setup
+' ============================================================================
+Sub SetupArchiveSheet(wsArchive As Worksheet)
+    ' Clear and set up the archive sheet with proper headers
+    
+    wsArchive.Cells.Clear
+    
+    ' Main title
+    wsArchive.Range("A1").Value = "ARCHIVE OF BOSS KC CHANGES"
+    With wsArchive.Range("A1:F1")
+        .Merge
+        .Font.Bold = True
+        .Font.Size = 16
+        .HorizontalAlignment = xlCenter
+        .VerticalAlignment = xlCenter
+        .RowHeight = 30
+        .Interior.Color = RGB(91, 155, 213) ' Nice blue
+        .Font.Color = RGB(255, 255, 255) ' White text
+    End With
+    
+    ' Subtitle
+    wsArchive.Range("A2").Value = "Last 10 differentials shown - Most recent at top"
+    With wsArchive.Range("A2:F2")
+        .Merge
+        .Font.Italic = True
+        .Font.Size = 10
+        .HorizontalAlignment = xlCenter
+        .Font.Color = RGB(100, 100, 100)
+    End With
+    
+    ' Column headers will be added by ArchiveTheChanges
+End Sub
+
+' ============================================================================
+' BUTTON 3: COMPARE CHANGES (Boss Totals Comparison)
+' ============================================================================
+Sub CompareBossChanges()
+    Dim wsCurrent As Worksheet
+    Dim wsPrevious As Worksheet
+    Dim wsChanges As Worksheet
+    Dim wsChart As Worksheet
+    Dim currentDict As Object
+    Dim i As Long, changeRow As Long, lastRow As Long
+    Dim bossName As String, currentKC As Double, prevKC As Double
+    Dim changeAmount As Double
+    Dim hasChart As Boolean
+    
+    Application.ScreenUpdating = False
+    
+    Set wsCurrent = ThisWorkbook.Sheets("Current Data")
+    Set wsPrevious = ThisWorkbook.Sheets("Previous Data")
+    Set wsChanges = ThisWorkbook.Sheets("Changes")
+    
+    ' Clear Changes sheet
+    wsChanges.Cells.Clear
+    
+    ' Check if we have previous data
+    If wsPrevious.Range("A3").Value = "" Then
+        wsChanges.Range("A1").Value = "No previous data to compare"
+        MsgBox "No previous data found." & vbCrLf & _
+               "First: 1. Import Boss Totals" & vbCrLf & _
+               "Then:  2. Copy to Previous", vbExclamation, "No Data"
+        Exit Sub
+    End If
+    
+    ' Set up Changes sheet headers
+    wsChanges.Range("A1").Value = "BOSS KC CHANGES"
+    wsChanges.Range("A2:F2").Value = Array("Boss", "Previous KC", "Current KC", "Change", "% Change", "Activity Level")
+    wsChanges.Range("A2:F2").Font.Bold = True
+    wsChanges.Range("A2:F2").Interior.Color = RGB(217, 217, 217)
+    
+    ' Build dictionary of current bosses
+    Set currentDict = CreateObject("Scripting.Dictionary")
+    lastRow = wsCurrent.Cells(wsCurrent.Rows.count, "A").End(xlUp).Row
+    
+    If lastRow >= 3 Then
+        For i = 3 To lastRow
+            bossName = Trim(wsCurrent.Cells(i, 1).Value)
+            If bossName <> "" Then
+                currentDict(bossName) = i
+            End If
+        Next i
+    End If
+    
+    ' Compare and list changes
+    changeRow = 3
+    Dim prevLastRow As Long
+    prevLastRow = wsPrevious.Cells(wsPrevious.Rows.count, "A").End(xlUp).Row
+    
+    ' Arrays to store data for chart
+    Dim chartData() As Variant
+    ReDim chartData(1 To 100, 1 To 3) ' Boss, Change, Color
+    
+    Dim dataCount As Long
+    dataCount = 0
+    
+    For i = 3 To prevLastRow
+        bossName = Trim(wsPrevious.Cells(i, 1).Value)
+        
+        If currentDict.Exists(bossName) Then
+            Dim currentRow As Long
+            currentRow = currentDict(bossName)
+            
+            ' Get KC values
+            currentKC = Val(wsCurrent.Cells(currentRow, 2).Value)
+            prevKC = Val(wsPrevious.Cells(i, 2).Value)
+            changeAmount = currentKC - prevKC
+            
+            ' Only include bosses with changes
+            If changeAmount <> 0 Then
+                ' Write to Changes sheet
+                wsChanges.Cells(changeRow, 1).Value = bossName
+                wsChanges.Cells(changeRow, 2).Value = prevKC
+                wsChanges.Cells(changeRow, 3).Value = currentKC
+                wsChanges.Cells(changeRow, 4).Value = changeAmount
+                
+                ' Calculate percentage change
+                If prevKC > 0 Then
+                    wsChanges.Cells(changeRow, 5).Value = changeAmount / prevKC
+                    wsChanges.Cells(changeRow, 5).NumberFormat = "0.0%"
+                Else
+                    wsChanges.Cells(changeRow, 5).Value = "New"
+                End If
+                
+                ' Determine activity level
+                If changeAmount > 0 Then
+                    wsChanges.Cells(changeRow, 6).Value = "INCREASE"
+                    wsChanges.Cells(changeRow, 6).Interior.Color = RGB(198, 239, 206) ' Green
+                    wsChanges.Cells(changeRow, 4).Interior.Color = RGB(198, 239, 206)
+                Else
+                    wsChanges.Cells(changeRow, 6).Value = "DECREASE"
+                    wsChanges.Cells(changeRow, 6).Interior.Color = RGB(255, 199, 206) ' Red
+                    wsChanges.Cells(changeRow, 4).Interior.Color = RGB(255, 199, 206)
+                End If
+                
+                ' Store for chart
+                dataCount = dataCount + 1
+                chartData(dataCount, 1) = bossName
+                chartData(dataCount, 2) = changeAmount
+                If changeAmount > 0 Then
+                    chartData(dataCount, 3) = 4 ' Green marker
+                Else
+                    chartData(dataCount, 3) = 3 ' Red marker
+                End If
+                
+                changeRow = changeRow + 1
+            End If
+        End If
+    Next i
+    
+    ' Format Changes sheet
+    If changeRow > 3 Then
+        lastRow = changeRow - 1
+        
+        ' Auto-fit columns
+        wsChanges.Columns("A:F").AutoFit
+        
+        ' Format numbers
+        wsChanges.Range("B3:D" & lastRow).NumberFormat = "#,##0"
+        wsChanges.Range("D3:D" & lastRow).NumberFormat = "+#,##0;-#,##0"
+        
+        ' Center align
+        wsChanges.Range("A3:F" & lastRow).HorizontalAlignment = xlCenter
+        
+        ' Add borders
+        With wsChanges.Range("A2:F" & lastRow)
+            .Borders.LineStyle = xlContinuous
+            .Borders.Weight = xlThin
+        End With
+        
+        ' Add filter
+        wsChanges.Range("A2:F" & lastRow).AutoFilter
+        
+        ' Sort by change amount (highest increase first)
+        wsChanges.Sort.SortFields.Clear
+        wsChanges.Sort.SortFields.Add2 Key:=wsChanges.Range("D3:D" & lastRow), _
+            SortOn:=xlSortOnValues, Order:=xlDescending
+        With wsChanges.Sort
+            .SetRange wsChanges.Range("A2:F" & lastRow)
+            .Header = xlYes
+            .Apply
+        End With
+        
+        ' Create chart if we have data
+        If dataCount > 0 Then
+            ' Call CreateBossChangeChart(wsChanges, chartData, dataCount)
+        End If
+        
+        MsgBox dataCount & " bosses show KC changes" & vbCrLf & _
+               "Green = Increases (PK targets)", vbInformation, "Changes Found"
+    Else
+        wsChanges.Range("A3").Value = "No changes detected"
+        MsgBox "No boss KC changes detected", vbInformation, "No Changes"
+    End If
+    
+    Application.ScreenUpdating = True
+End Sub
+
+' ============================================================================
+' CREATE CHART FOR BOSS CHANGES
+' ============================================================================
+Sub CreateBossChangeChart(wsChanges As Worksheet, chartData As Variant, dataCount As Long)
+    Dim lastRow As Long
+    Dim chartRange As Range
+    Dim cht As ChartObject          ' ? usually better to use ChartObject
+    Dim ch As Chart                 ' ? the actual Chart
+    Dim i As Long, chartRow As Long
+    Dim colorCode As Long
+   
+    ' Clear previous chart-related content
+    wsChanges.Range("H:Z").ClearContents
+    wsChanges.Range("H:Z").ClearFormats
+   
+    ' Headers
+    wsChanges.Range("H1").Value = "Boss Changes Chart Data"
+    wsChanges.Range("H2").Value = "Boss Name"
+    wsChanges.Range("I2").Value = "KC Change"
+    wsChanges.Range("J2").Value = "Marker Color"
+   
+    ' Write data
+    chartRow = 3
+    For i = 1 To dataCount
+        If Not IsEmpty(chartData(i, 1)) Then
+            wsChanges.Cells(chartRow, 8).Value = chartData(i, 1)  ' Boss name
+            wsChanges.Cells(chartRow, 9).Value = chartData(i, 2)  ' Change amount
+            wsChanges.Cells(chartRow, 10).Value = chartData(i, 3) ' Color code
+            chartRow = chartRow + 1
+        End If
+    Next i
+   
+    If chartRow = 3 Then Exit Sub   ' ? no data ? exit
+   
+    lastRow = chartRow - 1
+   
+    ' Create chart
+    Set cht = wsChanges.ChartObjects.Add( _
+        Left:=wsChanges.Range("L1").Left, _
+        Top:=wsChanges.Range("L1").Top, _
+        Width:=600, _
+        Height:=400)
+   
+    Set ch = cht.Chart
+   
+    With ch
+        .ChartType = xlXYScatterLinesNoMarkers   ' or xlLine if you prefer markers later
+   
+        .SetSourceData Source:=wsChanges.Range("H2:J" & lastRow)
+   
+        .HasTitle = True
+        .ChartTitle.Text = "Boss KC Changes (Increases = PK Target)"
+   
+        With .Axes(xlCategory)
+            .HasTitle = True
+            .AxisTitle.Text = "Bosses"
+            .TickLabels.Orientation = -4166          ' xlUpward = -4166
+        End With
+   
+        With .Axes(xlValue)
+            .HasTitle = True
+            .AxisTitle.Text = "KC Change"
+        End With
+   
+        ' Only one series expected
+        With .SeriesCollection(1)
+            .Name = "KC Changes"
+   
+            ' Apply individual point colors
+            For i = 1 To .Points.count
+                ' Read color code from column J (10)
+                colorCode = wsChanges.Cells(i + 2, 10).Value
+                
+                If colorCode = 4 Then
+                    ' Green - increase
+                    With .Points(i).Format.line
+                        .Visible = msoTrue
+                        .ForeColor.RGB = RGB(0, 176, 80)
+                    End With
+                    ' If you later switch to markers ? also set .Format.Fill
+                Else
+                    ' Red - decrease
+                    With .Points(i).Format.line
+                        .Visible = msoTrue
+                        .ForeColor.RGB = RGB(255, 0, 0)
+                    End With
+                End If
+            Next i
+   
+            ' Data labels
+            .HasDataLabels = True
+        End With
+   End With
+End Sub
+' ============================================================================
+' VIEW ARCHIVE - Quick navigation
+' ============================================================================
+Sub ViewArchive()
+    ' Go to the Archived Changes sheet
+    ThisWorkbook.Sheets("Archived Changes").Activate
+    ThisWorkbook.Sheets("Archived Changes").Range("A2").Select
+End Sub
+
+' ============================================================================
+' CLEAR ARCHIVE - Reset the archive
+' ============================================================================
+Sub ClearArchive()
+    Dim wsArchive As Worksheet
+    Dim response As VbMsgBoxResult
+    
+    Set wsArchive = ThisWorkbook.Sheets("Archived Changes")
+    
+    response = MsgBox("Clear all archived changes?" & vbCrLf & _
+                     "This cannot be undone.", _
+                     vbYesNo + vbExclamation, "Clear Archive")
+    
+    If response = vbYes Then
+        wsArchive.Cells.Clear
+        
+        ' Recreate headers
+        wsArchive.Range("A1").Value = "ARCHIVE OF CHANGES (Last 10)"
+        wsArchive.Range("A2").Value = "Archive Date/Time"
+        wsArchive.Range("B2").Value = "Description"
+        wsArchive.Range("C2").Value = "Changes Summary"
+        
+        ' Format headers
+        With wsArchive.Range("A1:C1")
+            .Font.Bold = True
+            .Font.Size = 14
+            .Merge
+            .HorizontalAlignment = xlCenter
+        End With
+        
+        With wsArchive.Range("A2:C2")
+            .Font.Bold = True
+            .Interior.Color = RGB(217, 217, 217)
+            .HorizontalAlignment = xlCenter
+        End With
+        
+        wsArchive.Columns("A").NumberFormat = "yyyy-mm-dd hh:mm:ss"
+        
+        MsgBox "Archive cleared.", vbInformation
+    End If
+End Sub
+
+' ============================================================================
+' TEST ARCHIVE SYSTEM - Quick test
+' ============================================================================
+Sub TestArchiveSystem()
+    ' Test if all sheets exist and have basic setup
+    
+    Dim wsNames As Variant
+    Dim wsName As Variant
+    Dim ws As Worksheet
+    Dim result As String
+    
+    wsNames = Array("Current Data", "Previous Data", "Changes", "Archived Changes", "Dashboard")
+    
+    result = "=== SHEET STATUS ===" & vbCrLf & vbCrLf
+    
+    For Each wsName In wsNames
+        On Error Resume Next
+        Set ws = ThisWorkbook.Sheets(wsName)
+        If ws Is Nothing Then
+            result = result & "? " & wsName & " - MISSING" & vbCrLf
+        Else
+            result = result & "? " & wsName & " - OK" & vbCrLf
+        End If
+    Next wsName
+    
+    ' Check if Current Data has data
+    On Error Resume Next
+    Set ws = ThisWorkbook.Sheets("Current Data")
+    If Not ws Is Nothing Then
+        If ws.Range("A3").Value <> "" Then
+            result = result & vbCrLf & "Current Data has " & _
+                     (ws.Cells(ws.Rows.count, "A").End(xlUp).Row - 2) & " bosses"
+        Else
+            result = result & vbCrLf & "Current Data is empty - run ImportBossTotals first"
+        End If
+    End If
+    
+    MsgBox result, vbInformation, "Archive System Test"
+End Sub
+Sub ArchiveChangesAsTables()
+    ' Creates side-by-side tables with proper formatting
+    
+    Application.ScreenUpdating = False
+    
+    Dim wsChanges As Worksheet
+    Dim wsArchive As Worksheet
+    Dim lastRow As Long, lastCol As Long
+    Dim newTableCol As Long
+    Dim i As Long, j As Long
+    
+    Set wsChanges = ThisWorkbook.Sheets("Changes")
+    Set wsArchive = ThisWorkbook.Sheets("Archived Changes")
+    
+    ' Check if we have changes to archive
+    If wsChanges.Range("A3").Value = "" Then
+        MsgBox "No changes to archive. Run 'Compare Boss Changes' first.", vbExclamation
+        Exit Sub
+    End If
+    
+    ' Get data dimensions from Changes sheet
+    lastRow = wsChanges.Cells(wsChanges.Rows.count, "A").End(xlUp).Row
+    lastCol = wsChanges.Cells(2, wsChanges.Columns.count).End(xlToLeft).Column
+    
+    ' Find where to place next table (look horizontally, not vertically)
+    ' Start from column 1, then add 10 columns for each new table
+    newTableCol = 1
+    While wsArchive.Cells(1, newTableCol).Value <> "" And newTableCol < 50
+        newTableCol = newTableCol + 10 ' Leave space between tables
+    Wend
+    
+    ' ===== CREATE NEW ARCHIVE TABLE =====
+    
+    ' Add timestamp header (centered over the table)
+    With wsArchive.Cells(1, newTableCol)
+        .Value = Format(Now, "yyyy-mm-dd hh:mm")
+        .Font.Bold = True
+        .Font.Size = 11
+        .HorizontalAlignment = xlCenter
+        .Interior.Color = RGB(31, 78, 121) ' Dark blue
+        .Font.Color = RGB(255, 255, 255) ' White text
+    End With
+    
+    ' Merge header across all columns of the table
+    wsArchive.Range(wsArchive.Cells(1, newTableCol), wsArchive.Cells(1, newTableCol + lastCol - 1)).Merge
+    
+    ' Copy headers from Changes sheet (row 2)
+    For j = 1 To lastCol
+        wsArchive.Cells(2, newTableCol + j - 1).Value = wsChanges.Cells(2, j).Value
+    Next j
+    
+    ' Format headers (ROW 2)
+    With wsArchive.Range(wsArchive.Cells(2, newTableCol), wsArchive.Cells(2, newTableCol + lastCol - 1))
+        .Font.Bold = True
+        .Interior.Color = RGB(217, 217, 217) ' Gray
+        .HorizontalAlignment = xlCenter
+    End With
+    
+    ' Copy data from Changes sheet (starting at row 3)
+    For i = 3 To lastRow
+        For j = 1 To lastCol
+            wsArchive.Cells(i + 1, newTableCol + j - 1).Value = wsChanges.Cells(i, j).Value
+        Next j
+        
+        ' Color code increases/decreases (based on Change column = column D)
+        If wsChanges.Cells(i, 4).Value > 0 Then
+            ' Green for increase
+            wsArchive.Cells(i + 1, newTableCol + 3).Interior.Color = RGB(198, 239, 206) ' Change column
+            wsArchive.Cells(i + 1, newTableCol + 5).Interior.Color = RGB(198, 239, 206) ' Activity column
+        ElseIf wsChanges.Cells(i, 4).Value < 0 Then
+            ' Red for decrease
+            wsArchive.Cells(i + 1, newTableCol + 3).Interior.Color = RGB(255, 199, 206)
+            wsArchive.Cells(i + 1, newTableCol + 5).Interior.Color = RGB(255, 199, 206)
+        End If
+    Next i
+    
+    ' Format numbers in the new table
+    Dim tableLastRow As Long
+    tableLastRow = lastRow + 1
+    
+    ' Format Previous KC and Current KC columns (B and C)
+    wsArchive.Range(wsArchive.Cells(3, newTableCol + 1), wsArchive.Cells(tableLastRow, newTableCol + 2)).NumberFormat = "#,##0"
+    
+    ' Format Change column (D)
+    wsArchive.Range(wsArchive.Cells(3, newTableCol + 3), wsArchive.Cells(tableLastRow, newTableCol + 3)).NumberFormat = "+#,##0;-#,##0"
+    
+    ' Format % Change column (E) if it exists
+    If lastCol >= 5 Then
+        wsArchive.Range(wsArchive.Cells(3, newTableCol + 4), wsArchive.Cells(tableLastRow, newTableCol + 4)).NumberFormat = "0.0%"
+    End If
+    
+    ' Add borders to the entire table
+    With wsArchive.Range(wsArchive.Cells(1, newTableCol), wsArchive.Cells(tableLastRow, newTableCol + lastCol - 1))
+        .Borders.LineStyle = xlContinuous
+        .Borders.Weight = xlThin
+    End With
+    
+    ' Auto-fit columns for this table
+    For j = 0 To lastCol - 1
+        wsArchive.Columns(newTableCol + j).AutoFit
+        ' Set minimum width
+        If wsArchive.Columns(newTableCol + j).ColumnWidth < 10 Then
+            wsArchive.Columns(newTableCol + j).ColumnWidth = 10
+        End If
+    Next j
+    
+    ' Keep only last 5 tables (remove oldest if we have more)
+    Call KeepLastNTablesSimple(wsArchive, newTableCol)
+    
+    Application.ScreenUpdating = True
+    
+    MsgBox "Changes archived as new table at column " & GetColumnLetter(newTableCol), vbInformation
+End Sub
+
+' ============================================================================
+' KEEP LAST N TABLES SIMPLE - Helper function
+' ============================================================================
+Sub KeepLastNTablesSimple(wsArchive As Worksheet, currentTableCol As Long)
+    ' Keep only last 5 tables, remove older ones
+    
+    Dim tableCount As Long
+    Dim i As Long
+    
+    ' Count how many tables we have
+    tableCount = 0
+    For i = 1 To 50 Step 10
+        If wsArchive.Cells(1, i).Value <> "" Then
+            tableCount = tableCount + 1
+        Else
+            Exit For
+        End If
+    Next i
+    
+    ' If we have more than 5 tables, clear the oldest ones
+    If tableCount > 5 Then
+        Dim tablesToRemove As Long
+        tablesToRemove = tableCount - 5
+        
+        For i = 1 To tablesToRemove
+            ' Clear the oldest table (columns 1-6)
+            wsArchive.Columns(1).Resize(, 6).Clear
+            ' Shift all other tables left
+            For j = 7 To currentTableCol + 6
+                wsArchive.Columns(j).Copy wsArchive.Columns(j - 6)
+                wsArchive.Columns(j).Clear
+            Next j
+        Next i
+    End If
+End Sub
+
+' ============================================================================
+' SHIFT TABLES LEFT - When we run out of columns
+' ============================================================================
+Sub ShiftArchiveTablesLeft(wsArchive As Worksheet, tableWidth As Long)
+    ' Shift all tables left by one table width when we run out of space
+    
+    Dim lastTableCol As Long
+    Dim i As Long
+    
+    ' Find last table
+    lastTableCol = 1
+    Do While wsArchive.Cells(1, lastTableCol).Value <> ""
+        lastTableCol = lastTableCol + tableWidth + 2
+        If lastTableCol > 50 Then Exit Do
+    Loop
+    
+    ' Remove leftmost table
+    wsArchive.Columns(1).Resize(, tableWidth + 2).Clear
+    
+    ' Shift everything left
+    For i = tableWidth + 3 To lastTableCol
+        wsArchive.Columns(i).Copy wsArchive.Columns(i - tableWidth - 2)
+        wsArchive.Columns(i).Clear
+    Next i
+    
+    MsgBox "Shifted tables left to make room for new archive.", vbInformation
+End Sub
+
+' ============================================================================
+' GET COLUMN LETTER - Helper function
+' ============================================================================
+Function GetColumnLetter(colNum As Long) As String
+    GetColumnLetter = Split(Cells(1, colNum).Address(True, False), "$")(0)
+End Function
+
+' ============================================================================
+' CLEAR ALL ARCHIVES - Reset button
+' ============================================================================
+Sub ClearAllArchives()
+    Dim wsArchive As Worksheet
+    Dim response As VbMsgBoxResult
+    
+    Set wsArchive = ThisWorkbook.Sheets("Archived Changes")
+    
+    response = MsgBox("Clear all archived tables?" & vbCrLf & _
+                     "This cannot be undone.", _
+                     vbYesNo + vbExclamation, "Clear Archive")
+    
+    If response = vbYes Then
+        wsArchive.Cells.Clear
+        MsgBox "All archives cleared.", vbInformation
+    End If
+End Sub
+
+' ============================================================================
+' QUICK ARCHIVE BUTTON - One-click solution
+' ============================================================================
+Sub QuickArchiveButton()
+    ' One-click archive: Save + Compare + Archive
+    
+    Application.ScreenUpdating = False
+    
+    ' 1. Save current to previous
+    Call CopyCurrentToPrevious
+    
+    ' 2. Generate changes
+    Call CompareBossChanges
+    
+    ' 3. Archive as side-by-side table
+    Call ArchiveChangesAsTables
+    
+    Application.ScreenUpdating = True
+    
+    MsgBox "? Data saved to Previous" & vbCrLf & _
+           "? Changes generated" & vbCrLf & _
+           "? New archive table created", _
+           vbInformation, "Archive Complete"
+End Sub
+
+' ============================================================================
+' VIEW ARCHIVE - Navigate to archive sheet
+' ============================================================================
+Sub ViewArchiveTables()
+    ThisWorkbook.Sheets("Archived Changes").Activate
+    ThisWorkbook.Sheets("Archived Changes").Range("A1").Select
+End Sub
+
