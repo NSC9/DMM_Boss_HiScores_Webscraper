@@ -49,6 +49,18 @@ except Exception as e:
     traceback.print_exc()
     input("\nPress Enter to exit...")
     exit()
+try:
+    from rate_limiter import global_rate_limiter as rate_limiter
+    print(f"✅ Rate limiter imported")
+except Exception as e:
+    print(f"❌ Failed to import rate limiter: {e}")
+    # Create a simple fallback
+    class SimpleRateLimiter:
+        def wait_if_needed(self):
+            pass  # No rate limiting if import fails
+    
+    rate_limiter = SimpleRateLimiter()
+    print(f"🔄 Using simple rate limiter fallback")
 
 print("\n" + "=" * 60)
 print("📊 System Diagnostics:")
@@ -143,8 +155,6 @@ def scrape_boss_worker(boss_name, url, worker_id, tracker, max_pages=MAX_PAGES):
     """Worker function to scrape ALL pages for a boss - KEEP TRYING UNTIL SUCCESS"""
     all_players_data = []
     
-    #print(f"\n🎯 Starting {boss_name}...")
-    
     for page in range(1, max_pages + 1):
         tracker.update_boss_status(boss_name, page, "scraping")
         
@@ -154,10 +164,25 @@ def scrape_boss_worker(boss_name, url, worker_id, tracker, max_pages=MAX_PAGES):
             rows = scrape_page(boss_name, url, page, worker_id)
             
             if rows and len(rows) > 0:
+                # Check if this page has fewer than 25 players
+                player_count = len(rows)
                 all_players_data.extend(rows)
                 tracker.mark_page_complete()
-                tracker.update_boss_status(boss_name, page, f"✓ {len(rows)} players")
-                #print(f"   Page {page}: {len(rows)} players")
+                tracker.update_boss_status(boss_name, page, f"✓ {player_count} players")
+                
+                # 🔥 NEW FUNCTIONALITY: If page has fewer than 25 players, skip remaining pages
+                if player_count < 25:
+                    print(f"   Page {page}: Only {player_count}/25 players found. Skipping remaining pages for {boss_name}...")
+                    
+                    # Mark remaining pages as completed for progress tracking
+                    remaining_pages = max_pages - page
+                    for _ in range(remaining_pages):
+                        tracker.mark_page_complete()
+                    
+                    # Break out of the page loop entirely
+                    break
+                
+                #print(f"   Page {page}: {player_count} players")
                 break  # Success! Move to next page
             else:
                 page_attempts += 1
@@ -172,8 +197,12 @@ def scrape_boss_worker(boss_name, url, worker_id, tracker, max_pages=MAX_PAGES):
                 except:
                     pass
         
-        # Small pause between successful pages
-        if page < max_pages:
+        # 🔥 NEW: Check if we broke out due to <25 players
+        if rows and len(rows) < 25:
+            break  # Exit the for loop entirely, skip remaining pages
+        
+        # Small pause between successful pages (only if we have 25 players)
+        if page < max_pages and (not rows or len(rows) == 25):
             pause = random.uniform(3, 7)
             #print(f"⏸️  Pausing {pause:.1f}s before page {page + 1}...")
             time.sleep(pause)
@@ -242,69 +271,58 @@ def main():
         print("❌ No URLs loaded")
         return
     
-    print(f"🎯 Found {len(boss_urls)} bosses")
-    print(f"👷 Using {WORKERS} workers with {header_rotator.get_headers_count()} rotating headers")
-    print(f"📁 Output folder: {OUTPUT_FOLDER}")
-    print("\n" + "=" * 60)
-    
-    # Initialize status tracker
-    tracker = StatusTracker(len(boss_urls), MAX_PAGES)
+    print("📊 Analyzing boss data...")
     
     boss_items = list(boss_urls.items())
+    total_bosses = len(boss_items)
+    
+    # Initialize status tracker
+    tracker = StatusTracker(total_bosses, MAX_PAGES)
+    
     successful_bosses = 0
     
-    # Process bosses in batches of WORKERS
-    for i in range(0, len(boss_items), WORKERS):
-        batch = boss_items[i:i + WORKERS]
+    # Process ALL bosses with ThreadPoolExecutor
+    print(f"\n🚀 Starting concurrent processing of {total_bosses} bosses...")
+    
+    with ThreadPoolExecutor(max_workers=WORKERS) as executor:
+        # Submit all bosses at once
+        futures = {}
+        for worker_id, (boss_name, url) in enumerate(boss_items):
+            future = executor.submit(
+                scrape_boss_worker, 
+                boss_name, 
+                url, 
+                worker_id % WORKERS,
+                tracker,
+                MAX_PAGES
+            )
+            futures[future] = boss_name  # Future is KEY, boss_name is VALUE
         
-        # Print batch header
-        clear_status_line()
-        print(f"\n📦 Batch {i//WORKERS + 1}/{(len(boss_items) + WORKERS - 1)//WORKERS}: ", end="")
-        print(", ".join([boss[0] for boss in batch]))
+        # Track completed futures
+        completed_futures = []
         
-        try:
-            with ThreadPoolExecutor(max_workers=min(len(batch), WORKERS)) as executor:
-                futures = []
+        # Process results as they complete
+        for future in as_completed(futures):
+            boss_name = futures[future]
+            try:
+                boss_name, boss_data = future.result()
                 
-                for worker_id, (boss_name, url) in enumerate(batch):
-                    future = executor.submit(
-                        scrape_boss_worker, 
-                        boss_name, 
-                        url, 
-                        worker_id % WORKERS,
-                        tracker,
-                        MAX_PAGES
-                    )
-                    futures.append(future)
+                if process_and_save_boss_data(boss_name, boss_data, tracker):
+                    successful_bosses += 1
                 
-                # Process completed bosses
-                for future in as_completed(futures):
-                    try:
-                        boss_name, boss_data = future.result()
-                        
-                        if process_and_save_boss_data(boss_name, boss_data, tracker):
-                            successful_bosses += 1
-                            
-                        # Update status display
-                        print_status(tracker)
-                        
-                    except Exception as e:
-                        clear_status_line()
-                        print(f"❌ Error processing future: {e}")
-                        traceback.print_exc()
+                # Update status display
+                print_status(tracker)
                 
-        except Exception as e:
-            clear_status_line()
-            print(f"❌ Error in batch processing: {e}")
-            traceback.print_exc()
-        
-        # Update status after batch completion
-        print_status(tracker)
-        
-        # Delay between batches
-        if i + WORKERS < len(boss_items):
-            time.sleep(BOSS_DELAY)
-            print_status(tracker)
+                # Track this completed future
+                completed_futures.append(future)
+                
+                # Dynamic delay based on recent activity
+                if len(completed_futures) % 5 == 0:  # Every 5 bosses
+                    time.sleep(BOSS_DELAY * 2)  # Slightly longer pause
+                
+            except Exception as e:
+                clear_status_line()
+                print(f"❌ Error processing {boss_name}: {e}")
     
     # Final status
     clear_status_line()
