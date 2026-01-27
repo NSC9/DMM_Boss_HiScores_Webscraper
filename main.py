@@ -339,20 +339,77 @@ def main():
     print(f"{'='*60}")
 
 if __name__ == "__main__":
-    try:
-        main()
-    except KeyboardInterrupt:
-        clear_status_line()
-        print("\n\n⚠️ Script interrupted by user")
-        
-        # Show partial progress if interrupted
-        if 'tracker' in locals():
-            progress = tracker.get_progress()
-            print(f"📊 Partial progress: {progress['completed_bosses']}/{progress['total_bosses']} bosses")
-            print(f"⏱️ Time spent: {progress['elapsed']}")
-    except Exception as e:
-        clear_status_line()
-        print(f"\n❌ Unexpected error in main: {e}")
-        traceback.print_exc()
+    run_count = 0
     
-    input("\nPress Enter to exit...")
+    while True:
+        run_count += 1
+        
+        try:
+            # Re-import modules on subsequent runs to ensure fresh state
+            if run_count > 1:
+                print("\n🔄 Reloading modules for fresh run...")
+                
+                # Clear Python's module cache for critical modules
+                import importlib
+                modules_to_reload = ['config', 'csv_loader', 'scraper', 'header_rotator', 'rate_limiter']
+                
+                for module_name in modules_to_reload:
+                    if module_name in sys.modules:
+                        importlib.reload(sys.modules[module_name])
+                
+                # Re-import the specific objects
+                from config import CSV_FILE, OUTPUT_FOLDER, WORKERS, BOSS_DELAY, MAX_PAGES
+                from csv_loader import load_boss_urls
+                from scraper import scrape_page
+                from header_rotator import global_header_rotator as header_rotator
+                
+                # Handle rate limiter specially
+                try:
+                    from rate_limiter import global_rate_limiter as rate_limiter
+                except:
+                    class SimpleRateLimiter:
+                        def wait_if_needed(self):
+                            pass
+                    rate_limiter = SimpleRateLimiter()
+            
+            main()
+            
+            # Ask if user wants to run again
+            print("\n" + "="*60)
+            choice = input("✅ Run complete! Press Enter to run again, or type 'exit' to quit: ").strip().lower()
+            if choice == 'exit':
+                print("👋 Goodbye!")
+                break
+                
+            # Clear screen for next run
+            print("\n" * 3)
+            print("="*60)
+            print(f"🔄 STARTING RUN #{run_count + 1}")
+            print("="*60 + "\n")
+            
+        except KeyboardInterrupt:
+            clear_status_line()
+            print("\n\n⚠️ Script interrupted by user")
+            
+            # Show partial progress if interrupted
+            if 'tracker' in locals():
+                progress = tracker.get_progress()
+                print(f"📊 Partial progress: {progress['completed_bosses']}/{progress['total_bosses']} bosses")
+                print(f"⏱️ Time spent: {progress['elapsed']}")
+            
+            # Ask if they want to continue or exit after interruption
+            choice = input("\nPress Enter to continue scraping, or type 'exit' to quit: ").strip().lower()
+            if choice == 'exit':
+                print("👋 Goodbye!")
+                break
+                
+        except Exception as e:
+            clear_status_line()
+            print(f"\n❌ Unexpected error in main: {e}")
+            traceback.print_exc()
+            
+            # Ask if they want to retry after error
+            choice = input("\nPress Enter to retry, or type 'exit' to quit: ").strip().lower()
+            if choice == 'exit':
+                print("👋 Goodbye!")
+                break
